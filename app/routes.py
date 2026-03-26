@@ -9,7 +9,6 @@ from flask import Blueprint, render_template, request
 from scripts.compute_scores import calculate_score_components
 from scripts.compute_scores import compute_scores
 from scripts.fetch_twitch import fetch_twitch_data
-from scripts.fetch_twitch import fetch_game_live_snapshot
 from scripts.fetch_twitch import fetch_top_streamers_for_game
 from scripts.process_data import compute_metrics
 from scripts.utils import (
@@ -250,46 +249,7 @@ def _enrich_selected_game_live(selected_game):
     if not selected_game:
         return selected_game
 
-    game_id = selected_game.get("game_id")
-    if not game_id:
-        return selected_game
-
-    try:
-        live_snapshot = fetch_game_live_snapshot(game_id, top_streamer_limit=5)
-    except Exception:
-        return selected_game
-
-    streams = live_snapshot.get("streams", selected_game.get("streams", 0))
-    viewers = live_snapshot.get("viewers", selected_game.get("viewers", 0))
-    ratio = round((viewers / streams), 2) if streams > 0 else 0
-    rescored_games = compute_scores(
-        [
-            {
-                **selected_game,
-                "streams": streams,
-                "viewers": viewers,
-                "ratio": ratio,
-            }
-        ]
-    )
-    rescored_game = rescored_games[0] if rescored_games else {}
-
-    return {
-        **selected_game,
-        "streams": streams,
-        "viewers": viewers,
-        "ratio": ratio,
-        "score": rescored_game.get("score", selected_game.get("score", 0)),
-        "score_components": rescored_game.get(
-            "score_components",
-            selected_game.get("score_components", {}),
-        ),
-        "opportunity": rescored_game.get(
-            "opportunity",
-            selected_game.get("opportunity"),
-        ),
-        "top_streamers": live_snapshot.get("top_streamers", []),
-    }
+    return selected_game
 
 
 def _build_selected_top_streamers(selected_game):
@@ -425,6 +385,16 @@ def _percentile_rank(values, target):
     return round((less_or_equal / len(comparable)) * 100)
 
 
+def _lane_score(ratio_percentile, score_percentile, viewer_percentile, stream_percentile):
+    return round(
+        (ratio_percentile * 0.42)
+        + (score_percentile * 0.28)
+        + (viewer_percentile * 0.18)
+        - (stream_percentile * 0.12),
+        2,
+    )
+
+
 def _build_streaming_outlook(selected_game, games):
     if not selected_game:
         return None
@@ -460,19 +430,50 @@ def _build_streaming_outlook(selected_game, games):
     score_percentile = score_percentile or 0
     viewer_percentile = viewer_percentile or 0
     stream_percentile = stream_percentile or 0
+    lane_score = _lane_score(
+        ratio_percentile,
+        score_percentile,
+        viewer_percentile,
+        stream_percentile,
+    )
+    crowd_pressure = stream_percentile - ratio_percentile
+    lane_scores = []
+    ratio_values = [game.get("ratio", 0) for game in games]
+    score_values = [game.get("score", 0) for game in games]
+    viewer_values = [game.get("viewers", 0) for game in games]
+    stream_values = [game.get("streams", 0) for game in games]
+
+    for game in games:
+        game_lane_score = _lane_score(
+            _percentile_rank(ratio_values, game.get("ratio", 0)) or 0,
+            _percentile_rank(score_values, game.get("score", 0)) or 0,
+            _percentile_rank(viewer_values, game.get("viewers", 0)) or 0,
+            _percentile_rank(stream_values, game.get("streams", 0)) or 0,
+        )
+        lane_scores.append(game_lane_score)
+
+    lane_percentile = _percentile_rank(lane_scores, lane_score) or 0
 
     crowded_signal = (
-        (ratio <= 70 and streams >= 8)
-        or (ratio <= 100 and streams >= 14)
-        or (ratio <= 140 and streams >= 24)
+        lane_percentile <= 33
+    ) or (
+        stream_percentile >= 88
+        and ratio_percentile <= 72
+        and crowd_pressure >= 14
+    ) or (
+        ratio <= 275
+        and streams >= 6
     )
 
     promising_signal = (
-        (ratio >= 850 and viewers >= 800)
-        or (ratio >= 600 and viewers >= 1500)
-        or (ratio >= 400 and viewers >= 4000)
-        or (score >= 42 and ratio >= 300)
-        or (ratio_percentile >= 68 and score_percentile >= 50)
+        lane_percentile >= 67
+    ) or (
+        ratio_percentile >= 88
+        and stream_percentile <= 84
+    ) or (
+        ratio >= 1200
+        and viewers >= 1500
+        and streams <= 18
     )
 
     if promising_signal and not crowded_signal:
@@ -561,8 +562,8 @@ def _build_similar_categories(selected_game, games):
 
     closest_candidates = []
     stronger_candidates = []
-    promising_candidates = []
-    all_candidates = []
+    developing_candidates = []
+    fallback_candidates = []
 
     for game in games:
         game_name = (game.get("game_name") or game.get("game") or "").lower()
@@ -574,11 +575,21 @@ def _build_similar_categories(selected_game, games):
         game_viewers = game.get("viewers", 0)
         game_streams = game.get("streams", 0)
 
-        score_gap = abs(game.get("score", 0) - selected_score)
-        ratio_gap = abs(game.get("ratio", 0) - selected_ratio) / max(selected_ratio, 1)
-        viewer_gap = abs(game.get("viewers", 0) - selected_viewers) / max(selected_viewers, 1)
-        stream_gap = abs(game.get("streams", 0) - selected_streams) / max(selected_streams, 1)
-        distance = score_gap + (ratio_gap * 12) + (viewer_gap * 8) + (stream_gap * 5)
+        score_gap = abs(game_score - selected_score) / max(selected_score, 8)
+        ratio_gap = abs(game_ratio - selected_ratio) / max(selected_ratio, 75)
+        viewer_gap = abs(game_viewers - selected_viewers) / max(selected_viewers, 250)
+        stream_gap = abs(game_streams - selected_streams) / max(selected_streams, 2)
+        growth_gap = abs(game.get("growth", 0) - selected_growth) / max(abs(selected_growth), 5)
+        distance = (
+            (score_gap * 30)
+            + (ratio_gap * 35)
+            + (viewer_gap * 20)
+            + (stream_gap * 10)
+            + (growth_gap * 5)
+        )
+        viewer_band = game_viewers / max(selected_viewers, 1)
+        ratio_band = game_ratio / max(selected_ratio, 1)
+        stream_band = game_streams / max(selected_streams, 1)
 
         candidate = {
             "game_name": game.get("game_name") or game.get("game"),
@@ -590,102 +601,114 @@ def _build_similar_categories(selected_game, games):
             "href": f"{request.path}?category={quote(game.get('game_name') or game.get('game') or '')}",
             "distance": distance,
         }
-        all_candidates.append(candidate.copy())
+        fallback_candidates.append(candidate)
 
         if (
-            game_score >= max(selected_score * 1.08, selected_score + 3)
-            and game_ratio >= max(selected_ratio * 1.08, selected_ratio + 80)
-            and game_viewers >= selected_viewers * 0.7
-            and game_streams <= max(selected_streams * 1.4, selected_streams + 6)
+            0.55 <= viewer_band <= 1.8
+            and 0.65 <= ratio_band <= 1.6
+            and 0.4 <= stream_band <= 2.2
         ):
-            candidate["slot"] = "Stronger alternative"
-            candidate["recommendation"] = "A bit stronger than the current category"
+            candidate["slot"] = "Closest comparison"
+            candidate["recommendation"] = "Most comparable tracked lane"
             candidate["reason"] = (
-                f"It is outperforming this category on score and demand per stream, which suggests a slightly better streaming lane right now."
+                "Its tracked score, audience size, and viewers-per-stream profile are the closest overall match to this category."
             )
-            stronger_candidates.append(candidate)
-        elif (
-            game_score <= selected_score * 0.98
-            and game_ratio >= selected_ratio * 0.75
+            closest_candidates.append(candidate)
+
+        if (
+            game_score >= max(selected_score * 1.08, selected_score + 2)
+            and game_ratio >= max(selected_ratio * 1.1, selected_ratio + 40)
+            and game_viewers >= selected_viewers * 0.6
+            and game_streams <= max(selected_streams * 1.6, selected_streams + 8)
+        ):
+            stronger_candidates.append(
+                {
+                    **candidate,
+                    "slot": "Stronger alternative",
+                    "recommendation": "Stronger tracked lane",
+                    "reason": "It is currently posting a better score and stronger viewers-per-stream balance without requiring a much bigger audience jump.",
+                }
+            )
+
+        if (
+            game_score <= selected_score * 1.05
+            and 0.45 <= viewer_band <= 1.35
+            and game_ratio >= selected_ratio * 0.9
             and (
                 game.get("growth", 0) >= selected_growth + 2
                 or game.get("viewer_change", 0) > max(selected_game.get("viewer_change", 0), 0)
             )
         ):
-            candidate["slot"] = "Early growth option"
-            candidate["recommendation"] = "Early growth option"
-            candidate["reason"] = (
-                f"It is a bit weaker right now, but its recent growth signals suggest it could be improving into a better opportunity."
+            developing_candidates.append(
+                {
+                    **candidate,
+                    "slot": "Developing option",
+                    "recommendation": "Nearby category with improving momentum",
+                    "reason": "Its current lane is still in range of this category, but the recent movement looks a bit healthier.",
+                }
             )
-            promising_candidates.append(candidate)
-        else:
-            candidate["slot"] = "Closest comparison"
-            candidate["recommendation"] = "Closest comparison"
-            candidate["reason"] = (
-                f"It has the closest overall mix of score, live audience, and viewers per stream to the category you are viewing."
-            )
-            closest_candidates.append(candidate)
 
     closest_candidates.sort(key=lambda item: item["distance"])
     stronger_candidates.sort(key=lambda item: item["distance"])
-    promising_candidates.sort(key=lambda item: item["distance"])
-    all_candidates.sort(key=lambda item: item["distance"])
+    developing_candidates.sort(key=lambda item: item["distance"])
+    fallback_candidates.sort(key=lambda item: item["distance"])
 
     used_names = set()
 
-    def _pick_candidate(bucket, fallback_builder):
+    def _pick_candidate(bucket):
         for candidate in bucket:
             key = candidate["game_name"].lower()
             if key not in used_names:
                 used_names.add(key)
                 return candidate
 
-        for candidate in all_candidates:
+        return None
+
+    def _pick_fallback(slot, recommendation, reason):
+        for candidate in fallback_candidates:
             key = candidate["game_name"].lower()
             if key not in used_names:
-                fallback = fallback_builder(candidate.copy())
                 used_names.add(key)
-                return fallback
+                return {
+                    **candidate,
+                    "slot": slot,
+                    "recommendation": recommendation,
+                    "reason": reason,
+                }
 
         return None
 
     selected = []
 
-    closest_choice = _pick_candidate(
-        closest_candidates,
-        lambda candidate: {
-            **candidate,
-            "slot": "Closest comparison",
-            "recommendation": "Closest comparison",
-            "reason": "This is the nearest overall match on score, live audience, and viewers per stream from the remaining tracked categories.",
-        },
-    )
+    closest_choice = _pick_candidate(closest_candidates)
+    if not closest_choice:
+        closest_choice = _pick_fallback(
+            "Closest comparison",
+            "Closest comparison",
+            "This is the nearest overall match on score, live audience, and viewers per stream in the current tracked snapshot.",
+        )
     if closest_choice:
         selected.append(closest_choice)
 
-    stronger_choice = _pick_candidate(
-        stronger_candidates,
-        lambda candidate: {
-            **candidate,
-            "slot": "Stronger alternative",
-            "recommendation": "Best stronger alternative available",
-            "reason": "This is the strongest nearby alternative from the remaining tracked categories, even if it is not a perfect direct upgrade on every metric.",
-        },
-    )
+    stronger_choice = _pick_candidate(stronger_candidates)
+    if not stronger_choice:
+        stronger_choice = _pick_fallback(
+            "Stronger alternative",
+            "Best stronger alternative available",
+            "This is the strongest nearby tracked option still reasonably close to the current category.",
+        )
     if stronger_choice:
         selected.append(stronger_choice)
 
-    promising_choice = _pick_candidate(
-        promising_candidates,
-        lambda candidate: {
-            **candidate,
-            "slot": "Early growth option",
-            "recommendation": "Best early growth option available",
-            "reason": "This is the closest remaining category that still looks like an earlier-stage bet with some room to improve.",
-        },
-    )
-    if promising_choice:
-        selected.append(promising_choice)
+    developing_choice = _pick_candidate(developing_candidates)
+    if not developing_choice:
+        developing_choice = _pick_fallback(
+            "Developing option",
+            "Best developing option available",
+            "This is the closest remaining tracked category showing some room to improve based on recent movement.",
+        )
+    if developing_choice:
+        selected.append(developing_choice)
 
     return selected
 
@@ -699,8 +722,10 @@ def _build_also_watch_categories(selected_game, games, excluded_names=None):
     selected_ratio = selected_game.get("ratio", 0)
     selected_viewers = selected_game.get("viewers", 0)
     selected_growth = selected_game.get("growth", 0)
+    selected_streams = selected_game.get("streams", 0)
 
     candidates = []
+    fallback_candidates = []
     for game in games:
         game_name = (game.get("game_name") or game.get("game") or "").lower()
         if not game_name or game_name == selected_name or game_name in excluded_names:
@@ -711,32 +736,31 @@ def _build_also_watch_categories(selected_game, games, excluded_names=None):
         game_growth = game.get("growth", 0)
         game_streams = game.get("streams", 0)
 
-        audience_gap = abs(game_viewers - selected_viewers) / max(selected_viewers, 1)
-        ratio_gap = abs(game_ratio - selected_ratio) / max(max(selected_ratio, game_ratio), 1)
+        viewer_band = game_viewers / max(selected_viewers, 1)
+        ratio_band = game_ratio / max(selected_ratio, 1)
+        stream_band = game_streams / max(selected_streams, 1)
+        audience_gap = abs(1 - viewer_band)
+        ratio_gap = abs(1 - ratio_band)
+        stream_gap = abs(1 - stream_band)
         growth_gap = abs(game_growth - selected_growth) / max(max(abs(selected_growth), abs(game_growth)), 5)
 
         affinity = 100
-        affinity -= audience_gap * 48
-        affinity -= ratio_gap * 18
-        affinity -= growth_gap * 8
-        affinity -= min(game_streams / 120, 6)
-
-        viewer_band = game_viewers / max(selected_viewers, 1)
-        ratio_band = game_ratio / max(selected_ratio, 1)
+        affinity -= audience_gap * 38
+        affinity -= ratio_gap * 28
+        affinity -= stream_gap * 16
+        affinity -= growth_gap * 10
 
         if 0.65 <= viewer_band <= 1.6:
             affinity += 12
         if 0.75 <= ratio_band <= 1.45:
             affinity += 6
-        if game_growth > 0:
-            affinity += min(game_growth / 5, 5)
+        if 0.7 <= stream_band <= 1.5:
+            affinity += 5
+        if game_growth > selected_growth:
+            affinity += min((game_growth - selected_growth) / 4, 6)
 
-        if affinity <= 0:
-            continue
-
-        audience_bucket = round(game_viewers / 5000) if game_viewers > 0 else 0
-
-        candidates.append({
+        audience_bucket = round(game_viewers / max(selected_viewers, 1), 1)
+        candidate = {
             "game_name": game.get("game_name") or game.get("game"),
             "viewers": game_viewers,
             "ratio": round(game_ratio, 2),
@@ -745,9 +769,18 @@ def _build_also_watch_categories(selected_game, games, excluded_names=None):
             "href": f"{request.path}?category={quote(game.get('game_name') or game.get('game') or '')}",
             "affinity": round(affinity, 1),
             "audience_bucket": audience_bucket,
-        })
+        }
+        fallback_candidates.append(candidate)
+
+        if not (0.35 <= viewer_band <= 2.4 and 0.45 <= ratio_band <= 1.9 and 0.25 <= stream_band <= 2.8):
+            continue
+        if affinity <= 25:
+            continue
+
+        candidates.append(candidate)
 
     candidates.sort(key=lambda item: (-item["affinity"], -item["viewers"], -item["ratio"]))
+    fallback_candidates.sort(key=lambda item: (-item["affinity"], -item["viewers"], -item["ratio"]))
     selected = []
     used_names = set()
     used_buckets = set()
@@ -757,7 +790,7 @@ def _build_also_watch_categories(selected_game, games, excluded_names=None):
         bucket = candidate["audience_bucket"]
         if key in used_names:
             continue
-        if bucket in used_buckets and len(selected) < 3:
+        if bucket in used_buckets and len(selected) < 4:
             continue
         selected.append(candidate)
         used_names.add(key)
@@ -767,6 +800,16 @@ def _build_also_watch_categories(selected_game, games, excluded_names=None):
 
     if len(selected) < 5:
         for candidate in candidates:
+            key = candidate["game_name"].lower()
+            if key in used_names:
+                continue
+            selected.append(candidate)
+            used_names.add(key)
+            if len(selected) == 5:
+                break
+
+    if len(selected) < 5:
+        for candidate in fallback_candidates:
             key = candidate["game_name"].lower()
             if key in used_names:
                 continue
