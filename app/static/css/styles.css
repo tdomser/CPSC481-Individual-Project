@@ -109,6 +109,115 @@ a {
     padding: 22px;
 }
 
+.breakout-board {
+    margin-bottom: 28px;
+    padding: 16px;
+    border-radius: 26px;
+    background:
+        radial-gradient(circle at top right, rgba(81, 227, 143, 0.1), transparent 24%),
+        linear-gradient(180deg, rgba(18, 24, 32, 0.96), rgba(12, 15, 21, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.breakout-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+    margin-bottom: 14px;
+}
+
+.breakout-header h2 {
+    margin: 0;
+    font-family: "Sora", sans-serif;
+    font-size: clamp(1.2rem, 1.7vw, 1.7rem);
+}
+
+.breakout-description {
+    max-width: 360px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.93rem;
+    line-height: 1.5;
+}
+
+.breakout-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.breakout-card {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    border-radius: 22px;
+    overflow: hidden;
+    background: rgba(13, 16, 23, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    transition: transform 160ms ease, border-color 160ms ease, box-shadow 200ms ease;
+}
+
+.breakout-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(81, 227, 143, 0.35);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+.breakout-media {
+    aspect-ratio: 4 / 5;
+    background: #202532;
+    overflow: hidden;
+}
+
+.breakout-media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.breakout-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+}
+
+.breakout-top {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    min-height: 72px;
+}
+
+.breakout-top strong {
+    display: -webkit-box;
+    font-size: 0.95rem;
+    line-height: 1.35;
+    min-height: calc(1.35em * 2);
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.breakout-signal {
+    margin: 0;
+    color: #9edfb7;
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.breakout-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: auto;
+}
+
 .chooser-header,
 .selected-toolbar {
     display: flex;

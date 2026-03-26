@@ -7,8 +7,10 @@ from flask import Blueprint, render_template, request
 
 from app.config import CACHE_VERSION
 from app.config import LIVE_REFRESH_MAX_PAGES
+from app.config import MIN_TRACKED_STREAM_VIEWERS
 from app.config import REFRESH_INTERVAL
 from app.services.category_logic import build_also_watch_categories
+from app.services.category_logic import build_breakout_predictions
 from app.services.category_logic import build_similar_categories
 from app.services.category_logic import build_streaming_outlook
 from scripts.compute_scores import calculate_score_components
@@ -60,8 +62,15 @@ def _cache_is_usable(cached_snapshot):
     return cached_snapshot.get("cache_version") == CACHE_VERSION and bool(cached_snapshot.get("games"))
 
 
+def _cache_has_games(cached_snapshot):
+    return bool(cached_snapshot.get("games"))
+
+
 def _build_dashboard_snapshot(max_pages, source_label, status_message=None):
-    raw = fetch_twitch_data(max_pages=max_pages)
+    raw = fetch_twitch_data(
+        max_pages=max_pages,
+        min_viewers=MIN_TRACKED_STREAM_VIEWERS,
+    )
     metrics = compute_metrics(raw)
     scored = compute_scores(metrics)
     for index, game in enumerate(scored, start=1):
@@ -139,6 +148,7 @@ def _build_view_model(games):
     if not games:
         return {
             "games": [],
+            "breakout_predictions": [],
             "selected_game": None,
             "top_three": [],
             "selected_history_summary": {"count": 0, "start": None, "end": None},
@@ -168,6 +178,11 @@ def _build_view_model(games):
         if selected_game:
             selected_game = _enrich_selected_game_live(selected_game)
 
+    selected_history = _build_selected_history(selected_game)
+    selected_history_summary = _build_selected_history_summary(selected_game, selected_history)
+    selected_analytics = _build_selected_analytics(selected_game, selected_history)
+    breakout_predictions = build_breakout_predictions(games, request.path) if not selected_game else []
+
     metrics_summary = {
         "avg_score": round(sum(game.get("score", 0) for game in games) / len(games), 2),
         "avg_growth": round(sum(game.get("growth", 0) for game in games) / len(games), 2),
@@ -183,11 +198,12 @@ def _build_view_model(games):
 
     return {
         "games": games,
+        "breakout_predictions": breakout_predictions,
         "selected_game": selected_game,
         "selected_description": _build_selected_description(selected_game),
-        "selected_history": _build_selected_history(selected_game),
-        "selected_history_summary": _build_selected_history_summary(selected_game),
-        "selected_analytics": _build_selected_analytics(selected_game),
+        "selected_history": selected_history,
+        "selected_history_summary": selected_history_summary,
+        "selected_analytics": selected_analytics,
         "selected_streaming_outlook": _build_streaming_outlook(selected_game, games),
         "similar_categories": similar_categories,
         "also_watch_categories": _build_also_watch_categories(
@@ -235,7 +251,7 @@ def _build_selected_history(selected_game):
     return get_game_history(game_name)
 
 
-def _build_selected_history_summary(selected_game):
+def _build_selected_history_summary(selected_game, history=None):
     if not selected_game:
         return {"count": 0, "start": None, "end": None}
 
@@ -243,7 +259,17 @@ def _build_selected_history_summary(selected_game):
     if not game_name:
         return {"count": 0, "start": None, "end": None}
 
-    return get_game_history_summary(game_name)
+    if history is None:
+        return get_game_history_summary(game_name)
+
+    if not history:
+        return {"count": 0, "start": None, "end": None}
+
+    return {
+        "count": len(history),
+        "start": history[0].get("timestamp"),
+        "end": history[-1].get("timestamp"),
+    }
 
 
 def _enrich_selected_game_live(selected_game):
@@ -307,11 +333,12 @@ def _calculate_range_delta(history, field, minutes):
     return round(end_entry.get(field, 0) - baseline.get(field, 0), 2)
 
 
-def _build_selected_analytics(selected_game):
+def _build_selected_analytics(selected_game, history=None):
     if not selected_game:
         return None
 
-    history = _build_selected_history(selected_game)
+    if history is None:
+        history = _build_selected_history(selected_game)
     if not history:
         score_components = selected_game.get("score_components") or calculate_score_components(selected_game)
         return {
@@ -488,6 +515,7 @@ def home():
         return render_template(
             "index.html",
             games=view_model["games"],
+            breakout_predictions=view_model["breakout_predictions"],
             selected_game=view_model["selected_game"],
             selected_description=view_model["selected_description"],
             selected_top_streamers=view_model["selected_top_streamers"],
@@ -505,12 +533,38 @@ def home():
             source_label=cached_snapshot.get("source_label", "Cached Twitch data"),
         )
 
+    if _cache_has_games(cached_snapshot):
+        _start_background_refresh()
+        view_model = _build_view_model(cached_snapshot.get("games", []))
+
+        return render_template(
+            "index.html",
+            games=view_model["games"],
+            breakout_predictions=view_model["breakout_predictions"],
+            selected_game=view_model["selected_game"],
+            selected_description=view_model["selected_description"],
+            selected_top_streamers=view_model["selected_top_streamers"],
+            selected_history=view_model["selected_history"],
+            selected_history_summary=view_model["selected_history_summary"],
+            selected_analytics=view_model["selected_analytics"],
+            selected_streaming_outlook=view_model["selected_streaming_outlook"],
+            similar_categories=view_model["similar_categories"],
+            also_watch_categories=view_model["also_watch_categories"],
+            top_three=view_model["top_three"],
+            metrics_summary=view_model["metrics_summary"],
+            error="Showing cached data while a deeper live refresh runs in the background.",
+            generated_at=cached_snapshot.get("generated_at"),
+            total_games=len(view_model["games"]),
+            source_label=cached_snapshot.get("source_label", "Cached Twitch data"),
+        )
+
     if _cache_is_usable(cached_snapshot):
         view_model = _build_view_model(cached_snapshot.get("games", []))
 
         return render_template(
             "index.html",
             games=view_model["games"],
+            breakout_predictions=view_model["breakout_predictions"],
             selected_game=view_model["selected_game"],
             selected_description=view_model["selected_description"],
             selected_top_streamers=view_model["selected_top_streamers"],
@@ -539,6 +593,7 @@ def home():
         return render_template(
             "index.html",
             games=view_model["games"],
+            breakout_predictions=view_model["breakout_predictions"],
             selected_game=view_model["selected_game"],
             selected_description=view_model["selected_description"],
             selected_top_streamers=view_model["selected_top_streamers"],

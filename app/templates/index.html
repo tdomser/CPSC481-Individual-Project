@@ -32,6 +32,54 @@
         </header>
 
         {% if not selected_game %}
+        {% if breakout_predictions %}
+        <section class="breakout-board" id="breakout-board">
+            <div class="similar-header breakout-header">
+                <div>
+                    <p class="panel-kicker">Next Big Games To Play</p>
+                    <h2>Five categories that look like breakout bets right now.</h2>
+                </div>
+                <p class="breakout-description">These picks lean on current score, recent growth, viewer change, and supply-demand balance while filtering out categories that already look fully established.</p>
+            </div>
+            <div class="breakout-grid">
+                {% for category in breakout_predictions %}
+                {% set breakout_opportunity_class = "opportunity-" ~ (category.opportunity|lower|replace(" ", "-")) %}
+                <a class="breakout-card" href="{{ category.href }}" data-breakout-link data-game-key="{{ (category.game_name or '')|lower }}">
+                    <div class="breakout-media">
+                        {% if category.box_art_url %}
+                        <img src="{{ category.box_art_url }}" alt="{{ category.game_name }} box art">
+                        {% else %}
+                        <div class="game-card-fallback">{{ category.game_name[:1] }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="breakout-copy">
+                        <div class="breakout-top">
+                            <strong>{{ category.game_name }}</strong>
+                            <span class="opportunity-pill {{ breakout_opportunity_class }} tooltip-anchor" data-live-field="opportunity" data-opportunity-class="{{ breakout_opportunity_class }}">
+                                {{ category.opportunity }}
+                                <span class="metric-tooltip">{{ opportunity_help(category.opportunity) }}</span>
+                            </span>
+                        </div>
+                        <p class="breakout-signal">{{ category.signal }}</p>
+                        <div class="breakout-metrics">
+                            <span class="gallery-inline-badge tooltip-anchor">
+                                Score
+                                <strong data-live-field="score" data-value="{{ category.score }}">{{ category.score }}</strong>
+                                <span class="metric-tooltip">Weighted breakout score based on viewers, viewers per stream, growth, and momentum.</span>
+                            </span>
+                            <span class="gallery-inline-badge tooltip-anchor">
+                                Viewers
+                                <strong data-live-field="viewers" data-value="{{ category.viewers }}">{{ "{:,}".format(category.viewers) }}</strong>
+                                <span class="metric-tooltip">Current live Twitch viewers in this category.</span>
+                            </span>
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
         <section class="chooser-board">
             <div class="chooser-header">
                 <div class="chooser-copy">

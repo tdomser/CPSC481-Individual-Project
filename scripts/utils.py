@@ -6,6 +6,8 @@ DASHBOARD_CACHE_FILE = "cache/dashboard_snapshot.json"
 HISTORY_FILE = "cache/metric_history.json"
 HISTORY_ARCHIVE_DIR = "cache/history_archive"
 MAX_HISTORY_POINTS = 20000
+_json_cache = {}
+_archive_cache = {}
 
 
 def _ensure_parent_dir(path):
@@ -16,14 +18,28 @@ def _ensure_parent_dir(path):
 
 def _load_json_file(path):
     if not os.path.exists(path):
+        _json_cache.pop(path, None)
         return {}
     if os.path.getsize(path) == 0:
+        _json_cache.pop(path, None)
         return {}
+
+    stat = os.stat(path)
+    cache_key = (stat.st_mtime_ns, stat.st_size)
+    cached_entry = _json_cache.get(path)
+    if cached_entry and cached_entry["cache_key"] == cache_key:
+        return cached_entry["data"]
 
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            _json_cache[path] = {
+                "cache_key": cache_key,
+                "data": data,
+            }
+            return data
     except (json.JSONDecodeError, OSError):
+        _json_cache.pop(path, None)
         return {}
 
 
@@ -31,6 +47,16 @@ def _save_json_file(path, data):
     _ensure_parent_dir(path)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f)
+    try:
+        stat = os.stat(path)
+    except OSError:
+        _json_cache.pop(path, None)
+        return
+
+    _json_cache[path] = {
+        "cache_key": (stat.st_mtime_ns, stat.st_size),
+        "data": data,
+    }
 
 
 def load_cache():
@@ -133,6 +159,68 @@ def append_snapshot_archive(games, snapshot_time=None):
         archive_file.write(json.dumps(archive_entry))
         archive_file.write("\n")
 
+    _archive_cache.pop(archive_path, None)
+
+
+def _load_archive_file_index(archive_path):
+    if not os.path.exists(archive_path):
+        _archive_cache.pop(archive_path, None)
+        return {}
+
+    try:
+        stat = os.stat(archive_path)
+    except OSError:
+        _archive_cache.pop(archive_path, None)
+        return {}
+
+    cache_key = (stat.st_mtime_ns, stat.st_size)
+    cached_entry = _archive_cache.get(archive_path)
+    if cached_entry and cached_entry["cache_key"] == cache_key:
+        return cached_entry["data"]
+
+    indexed_entries = {}
+
+    try:
+        with open(archive_path, "r", encoding="utf-8") as archive_file:
+            for line in archive_file:
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    snapshot = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                timestamp = snapshot.get("timestamp")
+                if not timestamp:
+                    continue
+
+                for game_name, game_snapshot in snapshot.get("games", {}).items():
+                    if not game_name:
+                        continue
+
+                    game_entries = indexed_entries.setdefault(game_name, {})
+                    game_entries[timestamp] = {
+                        "timestamp": timestamp,
+                        "rank": game_snapshot.get("rank"),
+                        "score": game_snapshot.get("score", 0),
+                        "viewers": game_snapshot.get("viewers", 0),
+                        "streams": game_snapshot.get("streams", 0),
+                        "ratio": game_snapshot.get("ratio", 0),
+                        "growth": game_snapshot.get("growth", 0),
+                        "viewer_change": game_snapshot.get("viewer_change", 0),
+                    }
+    except OSError:
+        _archive_cache.pop(archive_path, None)
+        return {}
+
+    _archive_cache[archive_path] = {
+        "cache_key": cache_key,
+        "data": indexed_entries,
+    }
+    return indexed_entries
+
 
 def _load_archived_game_history(game_name):
     if not os.path.isdir(HISTORY_ARCHIVE_DIR):
@@ -144,35 +232,9 @@ def _load_archived_game_history(game_name):
             continue
 
         archive_path = os.path.join(HISTORY_ARCHIVE_DIR, filename)
-        try:
-            with open(archive_path, "r", encoding="utf-8") as archive_file:
-                for line in archive_file:
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    try:
-                        snapshot = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-
-                    timestamp = snapshot.get("timestamp")
-                    game_snapshot = snapshot.get("games", {}).get(game_name)
-                    if not timestamp or not game_snapshot:
-                        continue
-
-                    archived_entries[timestamp] = {
-                        "timestamp": timestamp,
-                        "rank": game_snapshot.get("rank"),
-                        "score": game_snapshot.get("score", 0),
-                        "viewers": game_snapshot.get("viewers", 0),
-                        "streams": game_snapshot.get("streams", 0),
-                        "ratio": game_snapshot.get("ratio", 0),
-                        "growth": game_snapshot.get("growth", 0),
-                        "viewer_change": game_snapshot.get("viewer_change", 0),
-                    }
-        except OSError:
-            continue
+        archive_index = _load_archive_file_index(archive_path)
+        for timestamp, entry in archive_index.get(game_name, {}).items():
+            archived_entries[timestamp] = entry
 
     return [archived_entries[key] for key in sorted(archived_entries)]
 

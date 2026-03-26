@@ -968,6 +968,112 @@ document.addEventListener("DOMContentLoaded", () => {
         animateNumericElement(currentCount, "tracked_count", nextValue);
     };
 
+    const updateBreakoutCard = (currentCard, nextCard) => {
+        currentCard.href = nextCard.href;
+        currentCard.dataset.gameKey = nextCard.dataset.gameKey || "";
+
+        const currentTitle = currentCard.querySelector(".breakout-top strong");
+        const nextTitle = nextCard.querySelector(".breakout-top strong");
+        if (currentTitle && nextTitle) {
+            currentTitle.textContent = nextTitle.textContent;
+        }
+
+        const currentSignal = currentCard.querySelector(".breakout-signal");
+        const nextSignal = nextCard.querySelector(".breakout-signal");
+        if (currentSignal && nextSignal) {
+            currentSignal.textContent = nextSignal.textContent;
+        }
+
+        syncImage(
+            currentCard.querySelector(".breakout-media"),
+            nextCard.querySelector(".breakout-media"),
+        );
+
+        const currentScore = currentCard.querySelector('[data-live-field="score"]');
+        const nextScore = nextCard.querySelector('[data-live-field="score"]');
+        if (currentScore && nextScore) {
+            animateNumericElement(currentScore, "score", parseValue(nextScore));
+        }
+
+        const currentViewers = currentCard.querySelector('[data-live-field="viewers"]');
+        const nextViewers = nextCard.querySelector('[data-live-field="viewers"]');
+        if (currentViewers && nextViewers) {
+            animateNumericElement(currentViewers, "viewers", parseValue(nextViewers));
+        }
+
+        const currentOpportunity = currentCard.querySelector('[data-live-field="opportunity"]');
+        const nextOpportunity = nextCard.querySelector('[data-live-field="opportunity"]');
+        if (currentOpportunity && nextOpportunity) {
+            syncOpportunityElement(
+                currentOpportunity,
+                getOpportunityLabelText(nextOpportunity),
+                nextOpportunity.dataset.opportunityClass || "",
+            );
+        }
+    };
+
+    const syncBreakoutBoard = (nextDocument) => {
+        const currentBoard = document.querySelector("#breakout-board");
+        const nextBoard = nextDocument.querySelector("#breakout-board");
+
+        if (!currentBoard && !nextBoard) {
+            return true;
+        }
+
+        if (!currentBoard && nextBoard) {
+            const chooserBoard = document.querySelector(".chooser-board");
+            if (chooserBoard) {
+                chooserBoard.insertAdjacentElement("beforebegin", nextBoard);
+                initializeBaselineTrendColors();
+            }
+            return true;
+        }
+
+        if (currentBoard && !nextBoard) {
+            currentBoard.remove();
+            return true;
+        }
+
+        if (!currentBoard || !nextBoard) {
+            return false;
+        }
+
+        const currentCards = new Map(
+            [...currentBoard.querySelectorAll(".breakout-card")].map((card) => [
+                card.dataset.gameKey || card.href,
+                card,
+            ]),
+        );
+
+        const orderedCards = [];
+        [...nextBoard.querySelectorAll(".breakout-card")].forEach((nextCard) => {
+            const key = nextCard.dataset.gameKey || nextCard.href;
+            const currentCard = currentCards.get(key);
+
+            if (currentCard) {
+                updateBreakoutCard(currentCard, nextCard);
+                orderedCards.push(currentCard);
+                currentCards.delete(key);
+            } else {
+                orderedCards.push(nextCard);
+            }
+        });
+
+        const currentGrid = currentBoard.querySelector(".breakout-grid");
+        if (currentGrid) {
+            currentGrid.replaceChildren(...orderedCards);
+        }
+
+        const currentDescription = currentBoard.querySelector(".breakout-description");
+        const nextDescription = nextBoard.querySelector(".breakout-description");
+        if (currentDescription && nextDescription) {
+            currentDescription.textContent = nextDescription.textContent;
+        }
+
+        initializeBaselineTrendColors();
+        return true;
+    };
+
     const syncChooserBoard = (nextDocument) => {
         const currentGallery = document.querySelector("#category-list");
         const nextGallery = nextDocument.querySelector("#category-list");
@@ -1001,6 +1107,7 @@ document.addEventListener("DOMContentLoaded", () => {
         currentGallery.replaceChildren(...orderedCards);
         currentGallery.scrollTop = scrollTop;
         updateTrackedCount(nextDocument);
+        syncBreakoutBoard(nextDocument);
         initializeBaselineTrendColors();
         setupCategorySearch();
         return true;

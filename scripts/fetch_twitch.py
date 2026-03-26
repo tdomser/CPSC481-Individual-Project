@@ -118,7 +118,7 @@ def _fetch_user_metadata(headers, user_ids):
     return metadata
 
 
-def fetch_twitch_data(max_pages=None):
+def fetch_twitch_data(max_pages=None, min_viewers=0):
     token = get_access_token()
     snapshot_time = datetime.now(timezone.utc).isoformat()
 
@@ -157,11 +157,16 @@ def fetch_twitch_data(max_pages=None):
             break
 
         page_count += 1
+        hit_viewer_floor = False
 
         for stream in streams:
             game_id = stream.get("game_id")
             game_name = stream.get("game_name") or "Unknown"
             viewers = stream.get("viewer_count", 0)
+
+            if viewers < min_viewers:
+                hit_viewer_floor = True
+                continue
 
             if game_name not in game_data:
                 game_data[game_name] = {
@@ -176,7 +181,7 @@ def fetch_twitch_data(max_pages=None):
             game_data[game_name]["streams"] += 1
 
         cursor = payload.get("pagination", {}).get("cursor")
-        if not cursor:
+        if hit_viewer_floor or not cursor:
             break
 
     game_metadata = _fetch_game_metadata(headers, [stats.get("game_id") for stats in game_data.values()])

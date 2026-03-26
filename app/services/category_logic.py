@@ -1,4 +1,7 @@
+from statistics import mean
 from urllib.parse import quote
+
+from scripts.utils import get_game_history
 
 
 def percentile_rank(values, target):
@@ -80,19 +83,21 @@ def build_streaming_outlook(selected_game, games):
     crowded_signal = (
         lane_percentile <= 33
     ) or (
-        stream_percentile >= 88
-        and ratio_percentile <= 72
-        and crowd_pressure >= 14
+        crowd_pressure >= 18
+        and stream_percentile >= 72
+        and ratio_percentile <= 62
     ) or (
-        ratio <= 275
-        and streams >= 6
+        ratio <= 240
+        and streams >= 8
     )
 
     promising_signal = (
         lane_percentile >= 67
+        and crowd_pressure <= 14
+        and ratio_percentile >= 52
     ) or (
-        ratio_percentile >= 88
-        and stream_percentile <= 84
+        ratio_percentile >= 90
+        and stream_percentile <= 82
     ) or (
         ratio >= 1200
         and viewers >= 1500
@@ -435,3 +440,130 @@ def build_also_watch_categories(selected_game, games, base_path, excluded_names=
                 break
 
     return selected
+
+
+def build_breakout_predictions(games, base_path, limit=5):
+    if not games:
+        return []
+
+    score_values = [game.get("score", 0) for game in games]
+    ratio_values = [game.get("ratio", 0) for game in games]
+    viewer_values = [game.get("viewers", 0) for game in games]
+    growth_values = [game.get("growth", 0) for game in games]
+
+    candidates = []
+    for game in games:
+        game_name = game.get("game_name") or game.get("game")
+        if not game_name:
+            continue
+
+        viewers = game.get("viewers", 0)
+        streams = game.get("streams", 0)
+        score = game.get("score", 0)
+        ratio = game.get("ratio", 0)
+        growth = game.get("growth", 0)
+        viewer_change = game.get("viewer_change", 0)
+
+        score_percentile = percentile_rank(score_values, score) or 0
+        ratio_percentile = percentile_rank(ratio_values, ratio) or 0
+        viewer_percentile = percentile_rank(viewer_values, viewers) or 0
+        growth_percentile = percentile_rank(growth_values, growth) or 0
+
+        history = get_game_history(game_name)
+        recent_history = history[-12:] if history else []
+        prior_window = recent_history[:-4] if len(recent_history) >= 6 else recent_history[:-2]
+        recent_window = recent_history[-4:] if len(recent_history) >= 4 else recent_history
+
+        avg_prior_viewers = mean(entry.get("viewers", 0) for entry in prior_window) if prior_window else viewers
+        avg_recent_viewers = mean(entry.get("viewers", 0) for entry in recent_window) if recent_window else viewers
+        avg_prior_score = mean(entry.get("score", 0) for entry in prior_window) if prior_window else score
+        avg_recent_score = mean(entry.get("score", 0) for entry in recent_window) if recent_window else score
+        avg_prior_ratio = mean(entry.get("ratio", 0) for entry in prior_window) if prior_window else ratio
+        avg_recent_ratio = mean(entry.get("ratio", 0) for entry in recent_window) if recent_window else ratio
+
+        viewer_trend = avg_recent_viewers - avg_prior_viewers
+        score_trend = avg_recent_score - avg_prior_score
+        ratio_trend = avg_recent_ratio - avg_prior_ratio
+
+        recent_rank_values = [entry.get("rank") for entry in recent_history if entry.get("rank") is not None]
+        rank_trend = 0
+        if len(recent_rank_values) >= 2:
+            rank_trend = recent_rank_values[0] - recent_rank_values[-1]
+
+        history_count = len(history)
+        acceleration_bonus = 0
+        if len(recent_history) >= 6:
+            earlier_recent = recent_history[-8:-4] if len(recent_history) >= 8 else recent_history[:-4]
+            if earlier_recent and recent_window:
+                earlier_viewer_change = recent_window[-1].get("viewers", 0) - earlier_recent[0].get("viewers", 0)
+                latest_viewer_change = recent_window[-1].get("viewer_change", 0)
+                acceleration_bonus = max(latest_viewer_change - earlier_viewer_change, 0)
+
+        # Favor categories with strong current demand and upward motion,
+        # but avoid already-mature giants that are simply "big" right now.
+        established_penalty = max(viewer_percentile - 82, 0) * 0.8
+        oversupply_penalty = max(streams - 24, 0) * 0.35
+        history_bonus = min(history_count, 40) * 0.22
+        breakout_score = (
+            (score_percentile * 0.24)
+            + (ratio_percentile * 0.34)
+            + (growth_percentile * 0.22)
+            + (min(max(viewer_change, 0), 1500) / 30)
+            + (min(max(viewer_trend, 0), 4000) / 65)
+            + (min(max(score_trend, 0), 18) * 1.5)
+            + (min(max(ratio_trend, 0), 1200) / 85)
+            + (min(max(rank_trend, 0), 30) * 0.9)
+            + (min(max(acceleration_bonus, 0), 1500) / 55)
+            + (min(viewers, 15000) / 900)
+            + history_bonus
+            - established_penalty
+            - oversupply_penalty
+        )
+
+        if score <= 0 or streams <= 0:
+            continue
+        if viewers < 150:
+            continue
+        if ratio_percentile < 45:
+            continue
+        if history_count >= 4 and score_trend < -1.5 and viewer_trend < 0:
+            continue
+
+        if acceleration_bonus > 250 or viewer_trend > 900:
+            signal = "Momentum spike"
+        elif score_trend > 2 or rank_trend >= 8:
+            signal = "Climbing fast"
+        elif ratio_percentile >= 75 and streams <= 14 and ratio_trend >= 0:
+            signal = "Supply-demand edge"
+        else:
+            signal = "Early breakout watch"
+
+        candidates.append(
+            {
+                "game_name": game_name,
+                "score": score,
+                "viewers": viewers,
+                "ratio": ratio,
+                "growth": growth,
+                "viewer_change": viewer_change,
+                "box_art_url": game.get("box_art_url"),
+                "opportunity": game.get("opportunity"),
+                "href": f"{base_path}?category={quote(game_name)}",
+                "prediction_score": round(breakout_score, 2),
+                "signal": signal,
+                "history_count": history_count,
+                "score_trend": round(score_trend, 2),
+                "viewer_trend": round(viewer_trend),
+                "rank_trend": rank_trend,
+            }
+        )
+
+    candidates.sort(
+        key=lambda item: (
+            -item["prediction_score"],
+            -item["ratio"],
+            -item["growth"],
+            -item["viewers"],
+        )
+    )
+    return candidates[:limit]
