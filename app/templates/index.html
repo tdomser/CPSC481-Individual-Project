@@ -1,0 +1,550 @@
+{% macro opportunity_help(label) -%}
+    {% if label == "EXTREME" -%}
+        Breakout signals are exceptionally strong right now.
+    {%- elif label == "VERY HIGH" -%}
+        This category is showing very strong breakout potential.
+    {%- elif label == "HIGH" -%}
+        Demand and momentum both look strong for creators.
+    {%- elif label == "MEDIUM" -%}
+        This category has a healthy middle-ground opportunity profile right now.
+    {%- elif label == "LOW" -%}
+        Opportunity is weaker right now, with softer demand or heavier competition.
+    {%- else -%}
+        This category is currently one of the weakest streaming opportunities in the tracked field.
+    {%- endif %}
+{%- endmacro %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trend Predictor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body class="preload">
+    <div class="page-shell simple-shell">
+        <header class="title-board">
+            <p class="eyebrow">Live Twitch Trend Tracker</p>
+            <h1>Live Trend Predictor</h1>
+        </header>
+
+        {% if not selected_game %}
+        <section class="chooser-board">
+            <div class="chooser-header">
+                <div class="chooser-copy">
+                    <p class="panel-kicker">Select Category</p>
+                    <h2>Choose a category to explore.</h2>
+                </div>
+                <div class="chooser-tools">
+                    <div class="chooser-toolbar">
+                        <label class="search-field" for="category-search">
+                            <span class="search-label">Search categories</span>
+                            <input
+                                id="category-search"
+                                type="search"
+                                placeholder="Search tracked categories"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                        </label>
+                        <div class="chooser-meta">
+                            <span>Tracked</span>
+                            <strong data-live-field="tracked_count" data-value="{{ total_games }}">{{ total_games }}</strong>
+                        </div>
+                    </div>
+                    <div class="search-suggestions" id="search-suggestions" role="listbox" aria-label="Category suggestions"></div>
+                </div>
+            </div>
+
+            <div class="category-gallery" id="category-list">
+                {% for game in games %}
+                {% set game_name = game.game_name or game.game %}
+                {% set opportunity_class = "opportunity-" ~ (game.opportunity|lower|replace(" ", "-")) %}
+                <a
+                    class="gallery-card"
+                    href="{{ url_for('main.home', category=game_name) }}"
+                    data-category-link
+                    data-category-name="{{ game_name|lower }}"
+                    data-game-key="{{ game_name|lower }}"
+                >
+                    <div class="gallery-media">
+                        <div class="gallery-overlay-bar">
+                            <div class="gallery-rank">
+                                #{{ loop.index }}
+                            </div>
+                            <span
+                                class="opportunity-pill {{ opportunity_class }} tooltip-anchor gallery-opportunity-badge"
+                                data-live-field="opportunity"
+                                data-opportunity-class="{{ opportunity_class }}"
+                            >
+                                {{ game.opportunity }}
+                                <span class="metric-tooltip">{{ opportunity_help(game.opportunity) }}</span>
+                            </span>
+                        </div>
+                        {% if game.box_art_url %}
+                        <img src="{{ game.box_art_url }}" alt="{{ game_name }} box art">
+                        {% else %}
+                        <div class="game-card-fallback">{{ game_name[:1] }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="gallery-copy">
+                        <strong>{{ game_name }}</strong>
+                        <div class="gallery-metrics">
+                            <span class="gallery-inline-badge tooltip-anchor">
+                                Score
+                                <strong data-live-field="score" data-value="{{ game.score }}" data-baseline="{{ metrics_summary.avg_score }}">{{ game.score }}</strong>
+                                <span class="metric-tooltip">Weighted breakout score based on viewers, viewers per stream, growth, and momentum.</span>
+                            </span>
+                            <span class="gallery-inline-badge tooltip-anchor">
+                                Viewers
+                                <strong data-live-field="viewers" data-value="{{ game.viewers }}" data-baseline="{{ metrics_summary.total_viewers / (games|length if games else 1) }}">{{ "{:,}".format(game.viewers) }}</strong>
+                                <span class="metric-tooltip">Current live Twitch viewers in this category.</span>
+                            </span>
+                        </div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+        {% else %}
+        <section class="selected-board">
+            <div class="selected-toolbar">
+                <a class="back-button" href="{{ url_for('main.home') }}">Choose Another Category</a>
+            </div>
+
+            <div class="selected-hero-card">
+                <div class="selected-image">
+                    {% if selected_game.box_art_url %}
+                    <img src="{{ selected_game.box_art_url }}" alt="{{ selected_game.game_name or selected_game.game }} box art">
+                    {% else %}
+                    <div class="game-card-fallback large-fallback">{{ (selected_game.game_name or selected_game.game)[:1] }}</div>
+                    {% endif %}
+                </div>
+
+                <div class="selected-summary">
+                    <h2 data-selected-title>{{ selected_game.game_name or selected_game.game }}</h2>
+                    <p class="selected-subtext">{{ selected_description }}</p>
+                    <div class="score-row">
+                        <div class="score-badge tooltip-anchor">
+                            Score
+                            <span data-live-field="score" data-value="{{ selected_game.score }}">{{ selected_game.score }}</span>
+                            <span class="metric-tooltip">A weighted breakout score based on viewers, viewers per stream, growth, and momentum.</span>
+                        </div>
+                        <span class="delta-indicator" data-live-delta-for="score"></span>
+                    </div>
+                </div>
+            </div>
+
+            {% if selected_top_streamers %}
+            <section class="top-streamers-board">
+                <div class="similar-header">
+                    <p class="panel-kicker">Top Live Streamers</p>
+                    <h3 class="section-title">Who is leading this category right now</h3>
+                </div>
+                <div class="top-streamers-grid">
+                    {% for streamer in selected_top_streamers %}
+                    <a
+                        class="streamer-card{% if streamer.is_placeholder %} streamer-card-placeholder{% endif %}"
+                        data-streamer-key="{{ streamer.user_name|lower }}"
+                        href="{{ streamer.stream_url or '#' }}"
+                        {% if streamer.stream_url %}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        {% else %}
+                        aria-disabled="true"
+                        tabindex="-1"
+                        {% endif %}
+                    >
+                        <div class="streamer-media">
+                            {% if streamer.profile_image_url %}
+                            <img src="{{ streamer.profile_image_url }}" alt="{{ streamer.user_name }} profile picture">
+                            {% else %}
+                            <div class="game-card-fallback">{{ streamer.user_name[:1] }}</div>
+                            {% endif %}
+                            <span class="streamer-rank">#{{ loop.index }}</span>
+                        </div>
+                        <div class="streamer-copy">
+                            <strong>{{ streamer.user_name }}</strong>
+                            <span class="streamer-viewers similar-metric-badge">
+                                <span>Viewers</span>
+                                <strong data-live-field="viewers" data-value="{{ streamer.viewer_count }}" data-top-streamer-viewers="{{ streamer.user_name|lower }}">{{ "{:,}".format(streamer.viewer_count) }}</strong>
+                            </span>
+                            {% if streamer.is_placeholder %}
+                            <small class="streamer-placeholder-note">No additional live channel found right now.</small>
+                            {% endif %}
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+
+            <div class="stats-grid">
+                <article class="stat-tile">
+                    <span class="metric-label tooltip-anchor">Opportunity
+                        <span class="metric-tooltip">{{ opportunity_help(selected_game.opportunity) }}</span>
+                    </span>
+                    <strong
+                        class="opportunity-pill opportunity-{{ selected_game.opportunity|lower|replace(' ', '-') }} tooltip-anchor"
+                        data-live-field="opportunity"
+                        data-opportunity-class="opportunity-{{ selected_game.opportunity|lower|replace(' ', '-') }}"
+                    >
+                        {{ selected_game.opportunity }}
+                        <span class="metric-tooltip">{{ opportunity_help(selected_game.opportunity) }}</span>
+                    </strong>
+                </article>
+                <article class="stat-tile">
+                    <span class="metric-label tooltip-anchor">Viewers
+                        <span class="metric-tooltip">The total number of live Twitch viewers currently watching this category.</span>
+                    </span>
+                    <div class="stat-value-row">
+                        <strong data-live-field="viewers" data-value="{{ selected_game.viewers }}">{{ "{:,}".format(selected_game.viewers) }}</strong>
+                        <span class="delta-indicator" data-live-delta-for="viewers"></span>
+                    </div>
+                </article>
+                <article class="stat-tile">
+                    <span class="metric-label tooltip-anchor">Streams
+                        <span class="metric-tooltip">How many live Twitch streams are currently broadcasting in this category.</span>
+                    </span>
+                    <div class="stat-value-row">
+                        <strong data-live-field="streams" data-value="{{ selected_game.streams }}">{{ selected_game.streams }}</strong>
+                        <span class="delta-indicator" data-live-delta-for="streams"></span>
+                    </div>
+                </article>
+                <article class="stat-tile">
+                    <span class="metric-label tooltip-anchor">Viewer / Stream
+                        <span class="metric-tooltip">Average viewers per live stream. Higher values can suggest stronger demand relative to supply.</span>
+                    </span>
+                    <div class="stat-value-row">
+                        <strong data-live-field="ratio" data-value="{{ selected_game.ratio }}">{{ selected_game.ratio }}</strong>
+                        <span class="delta-indicator" data-live-delta-for="ratio"></span>
+                    </div>
+                </article>
+                <article class="stat-tile">
+                    <span class="metric-label tooltip-anchor">Growth
+                        <span class="metric-tooltip">Percent change in viewers compared with the previous snapshot for this category.</span>
+                    </span>
+                    <div class="stat-value-row">
+                        <strong data-live-field="growth" data-value="{{ selected_game.growth }}">{{ selected_game.growth }}%</strong>
+                        <span class="delta-indicator" data-live-delta-for="growth"></span>
+                    </div>
+                </article>
+                <article class="stat-tile">
+                    <span class="metric-label tooltip-anchor">Viewer Change
+                        <span class="metric-tooltip">The raw increase or decrease in live viewers since the previous refresh.</span>
+                    </span>
+                    <div class="stat-value-row">
+                        <strong data-live-field="viewer_change" data-value="{{ selected_game.viewer_change }}">{{ "{:+,}".format(selected_game.viewer_change) }}</strong>
+                        <span class="delta-indicator" data-live-delta-for="viewer_change"></span>
+                    </div>
+                </article>
+            </div>
+
+            {% if selected_analytics %}
+            <section class="insight-board" id="selected-analytics">
+                <div class="insight-header">
+                    <div>
+                        <p class="panel-kicker">Category Analytics</p>
+                        <h3 class="section-title">Breakout read for {{ selected_game.game_name or selected_game.game }}</h3>
+                    </div>
+                    <p class="insight-summary">{{ selected_analytics.supply_demand_summary }}</p>
+                </div>
+
+                <div class="insight-grid">
+                    <article class="insight-card insight-rank">
+                        <span>Rank</span>
+                        <strong>#{{ selected_analytics.rank or "-" }}</strong>
+                        <small>
+                            {% if selected_analytics.rank_change is not none %}
+                                {% if selected_analytics.rank_change > 0 %}
+                                Up {{ selected_analytics.rank_change }} from the previous snapshot
+                                {% elif selected_analytics.rank_change < 0 %}
+                                Down {{ selected_analytics.rank_change|abs }} from the previous snapshot
+                                {% else %}
+                                Unchanged from the previous snapshot
+                                {% endif %}
+                            {% else %}
+                                Rank change will appear once more history is collected
+                            {% endif %}
+                        </small>
+                    </article>
+
+                    <article class="insight-card insight-momentum insight-tone-{{ selected_analytics.momentum_tone }}">
+                        <span>Momentum</span>
+                        <strong>{{ selected_analytics.momentum_label }}</strong>
+                        <small>Based on recent score and viewer movement.</small>
+                    </article>
+
+                    <article class="insight-card insight-volatility insight-tone-{{ selected_analytics.volatility_tone }}">
+                        <span>Volatility</span>
+                        <strong>{{ selected_analytics.volatility_label }}</strong>
+                        <small>How sharply this category has been swinging over the saved range.</small>
+                    </article>
+
+                    <article class="insight-card insight-peak">
+                        <span>Peak Timestamp</span>
+                        <strong>{{ selected_analytics.peak_timestamp }}</strong>
+                        <small>When this category hit its strongest score in the saved range.</small>
+                    </article>
+
+                    <article class="insight-card insight-highlow insight-tone-{{ selected_analytics.score_range_tone }}">
+                        <span>Session High / Low</span>
+                        <strong>{{ selected_analytics.score_high }} / {{ selected_analytics.score_low }}</strong>
+                        <small>Score high and low across the current stored history.</small>
+                    </article>
+
+                    <article class="insight-card insight-highlow insight-tone-{{ selected_analytics.viewer_range_tone }}">
+                        <span>Viewer High / Low</span>
+                        <strong>{{ "{:,}".format(selected_analytics.viewer_high) }} / {{ "{:,}".format(selected_analytics.viewer_low) }}</strong>
+                        <small>Viewer high and low across the current stored history.</small>
+                    </article>
+
+                    <article class="insight-card">
+                        <span>Average Score</span>
+                        <strong>{{ selected_analytics.avg_score }}</strong>
+                        <small>Average opportunity score over the saved range.</small>
+                    </article>
+
+                    <article class="insight-card">
+                        <span>Average Viewers</span>
+                        <strong>{{ "{:,}".format(selected_analytics.avg_viewers) }}</strong>
+                        <small>Average live viewers over the saved range.</small>
+                    </article>
+
+                    <article class="insight-card">
+                        <span>Average Viewer / Stream</span>
+                        <strong>{{ selected_analytics.avg_ratio }}</strong>
+                        <small>Average demand relative to supply over the saved range.</small>
+                    </article>
+                </div>
+
+                <div class="insight-split">
+                    <article class="detail-card breakdown-card">
+                        <span class="detail-title">Opportunity Breakdown</span>
+                        <p class="detail-explainer">
+                            This shows how the current score is built. Higher viewer, ratio, and growth components help the category, while stream oversupply lowers it through the stream penalty.
+                        </p>
+                        <div class="detail-list">
+                            <div><span class="tooltip-anchor">Viewer score<span class="metric-tooltip">How much raw live audience size contributes to the total opportunity score.</span></span><strong class="metric-accent viewer-accent">{{ selected_analytics.score_components.viewer_score }}</strong></div>
+                            <div><span class="tooltip-anchor">Ratio score<span class="metric-tooltip">How much viewers-per-stream demand contributes to the total score. Higher demand per creator lifts this value.</span></span><strong class="metric-accent ratio-accent">{{ selected_analytics.score_components.ratio_score }}</strong></div>
+                            <div><span class="tooltip-anchor">Growth score<span class="metric-tooltip">How much recent positive audience growth is adding to the score right now.</span></span><strong class="metric-accent growth-accent">{{ selected_analytics.score_components.growth_score }}</strong></div>
+                            <div><span class="tooltip-anchor">Momentum bonus<span class="metric-tooltip">A bonus based on recent positive viewer movement that can push a rising category upward faster.</span></span><strong class="metric-accent momentum-accent">{{ selected_analytics.score_components.momentum_bonus }}</strong></div>
+                            <div><span class="tooltip-anchor">Stream penalty<span class="metric-tooltip">A penalty that lowers the score when stream supply is too thin or otherwise less reliable for comparison.</span></span><strong class="metric-accent penalty-accent">-{{ selected_analytics.score_components.stream_penalty }}</strong></div>
+                        </div>
+                    </article>
+
+                    <article class="detail-card trend-card">
+                        <span class="detail-title">Recent Trend Deltas</span>
+                        <p class="detail-explainer">
+                            These deltas compare the current category against earlier snapshots, so you can see whether score and viewership are improving or fading over the last 5 minutes, 30 minutes, and 1 hour.
+                        </p>
+                        <div class="detail-list">
+                            <div><span>Score 5m</span><strong class="{% if selected_analytics.score_delta_5m is not none and selected_analytics.score_delta_5m > 0 %}delta-up{% elif selected_analytics.score_delta_5m is not none and selected_analytics.score_delta_5m < 0 %}delta-down{% else %}delta-flat{% endif %}">{{ selected_analytics.score_delta_5m if selected_analytics.score_delta_5m is not none else "N/A" }}</strong></div>
+                            <div><span>Score 30m</span><strong class="{% if selected_analytics.score_delta_30m is not none and selected_analytics.score_delta_30m > 0 %}delta-up{% elif selected_analytics.score_delta_30m is not none and selected_analytics.score_delta_30m < 0 %}delta-down{% else %}delta-flat{% endif %}">{{ selected_analytics.score_delta_30m if selected_analytics.score_delta_30m is not none else "N/A" }}</strong></div>
+                            <div><span>Score 1h</span><strong class="{% if selected_analytics.score_delta_60m is not none and selected_analytics.score_delta_60m > 0 %}delta-up{% elif selected_analytics.score_delta_60m is not none and selected_analytics.score_delta_60m < 0 %}delta-down{% else %}delta-flat{% endif %}">{{ selected_analytics.score_delta_60m if selected_analytics.score_delta_60m is not none else "N/A" }}</strong></div>
+                            <div><span>Viewers 5m</span><strong class="{% if selected_analytics.viewer_delta_5m is not none and selected_analytics.viewer_delta_5m > 0 %}delta-up{% elif selected_analytics.viewer_delta_5m is not none and selected_analytics.viewer_delta_5m < 0 %}delta-down{% else %}delta-flat{% endif %}">{{ selected_analytics.viewer_delta_5m if selected_analytics.viewer_delta_5m is not none else "N/A" }}</strong></div>
+                            <div><span>Viewers 30m</span><strong class="{% if selected_analytics.viewer_delta_30m is not none and selected_analytics.viewer_delta_30m > 0 %}delta-up{% elif selected_analytics.viewer_delta_30m is not none and selected_analytics.viewer_delta_30m < 0 %}delta-down{% else %}delta-flat{% endif %}">{{ selected_analytics.viewer_delta_30m if selected_analytics.viewer_delta_30m is not none else "N/A" }}</strong></div>
+                            <div><span>Viewers 1h</span><strong class="{% if selected_analytics.viewer_delta_60m is not none and selected_analytics.viewer_delta_60m > 0 %}delta-up{% elif selected_analytics.viewer_delta_60m is not none and selected_analytics.viewer_delta_60m < 0 %}delta-down{% else %}delta-flat{% endif %}">{{ selected_analytics.viewer_delta_60m if selected_analytics.viewer_delta_60m is not none else "N/A" }}</strong></div>
+                        </div>
+                    </article>
+                </div>
+            </section>
+            {% endif %}
+
+            {% if selected_streaming_outlook %}
+            <article class="streaming-outlook streaming-outlook-{{ selected_streaming_outlook.tone }}">
+                <div class="similar-header">
+                    <p class="panel-kicker">Streaming Outlook</p>
+                    <h3 class="section-title">Should you stream this category?</h3>
+                </div>
+                <strong>{{ selected_streaming_outlook.verdict }}</strong>
+                <p class="streaming-recommendation">{{ selected_streaming_outlook.recommendation }}</p>
+                <p>{{ selected_streaming_outlook.summary }}</p>
+                <div class="streaming-breakdown">
+                    <div class="streaming-column">
+                        <span class="streaming-label">Why it could be good to stream here</span>
+                        <ul class="streaming-list">
+                            {% for point in selected_streaming_outlook.why_points %}
+                            <li>{{ point }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    <div class="streaming-column">
+                        <span class="streaming-label">What to watch out for</span>
+                        <ul class="streaming-list">
+                            {% for point in selected_streaming_outlook.caution_points %}
+                            <li>{{ point }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+                <p class="streamer-fit"><strong>Best fit:</strong> {{ selected_streaming_outlook.streamer_fit }}</p>
+                <p class="streaming-comparison">{{ selected_streaming_outlook.comparison }}</p>
+            </article>
+            {% endif %}
+
+            {% if similar_categories %}
+            <section class="similar-categories">
+                <div class="similar-header">
+                    <p class="panel-kicker">Similar Categories</p>
+                    <h3 class="section-title">Comparable streaming lanes</h3>
+                </div>
+                <p class="similar-description">Three comparable categories that may be worth checking if you want a similar or slightly better streaming lane.</p>
+                <div class="similar-grid">
+                    {% for category in similar_categories %}
+                    {% set similar_opportunity_class = "opportunity-" ~ (category.opportunity|lower|replace(" ", "-")) %}
+                    <a class="similar-card" href="{{ category.href }}">
+                        <div class="similar-media">
+                            {% if category.box_art_url %}
+                            <img src="{{ category.box_art_url }}" alt="{{ category.game_name }} box art">
+                            {% else %}
+                            <div class="game-card-fallback">{{ category.game_name[:1] }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="similar-card-top">
+                            <strong>{{ category.game_name }}</strong>
+                            <span class="opportunity-pill {{ similar_opportunity_class }} tooltip-anchor">
+                                {{ category.opportunity }}
+                                <span class="metric-tooltip">{{ opportunity_help(category.opportunity) }}</span>
+                            </span>
+                        </div>
+                        <p class="similar-slot">{{ category.slot }}</p>
+                        <p class="similar-recommendation">{{ category.recommendation }}</p>
+                        <p class="similar-reason">{{ category.reason }}</p>
+                            <div class="similar-metrics">
+                                <div class="similar-metric-badge tooltip-anchor">
+                                    <span>Score</span>
+                                    <strong class="{% if category.score > selected_game.score %}baseline-up{% elif category.score < selected_game.score %}baseline-down{% endif %}">{{ category.score }}</strong>
+                                    <span class="metric-tooltip">Weighted breakout score based on viewers, viewers per stream, growth, and momentum.</span>
+                                </div>
+                                <div class="similar-metric-badge tooltip-anchor">
+                                    <span>Viewers</span>
+                                    <strong class="{% if category.viewers > selected_game.viewers %}baseline-up{% elif category.viewers < selected_game.viewers %}baseline-down{% endif %}">{{ "{:,}".format(category.viewers) }}</strong>
+                                    <span class="metric-tooltip">Current live Twitch viewers in this category.</span>
+                                </div>
+                                <div class="similar-metric-badge tooltip-anchor">
+                                    <span>Viewer / Stream</span>
+                                    <strong class="{% if category.ratio > selected_game.ratio %}baseline-up{% elif category.ratio < selected_game.ratio %}baseline-down{% endif %}">{{ category.ratio }}</strong>
+                                    <span class="metric-tooltip">Average viewers per live stream. Higher values can indicate stronger demand relative to supply.</span>
+                                </div>
+                            </div>
+                    </a>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+
+            {% if also_watch_categories %}
+            <section class="also-watch-section">
+                <div class="similar-header">
+                    <p class="panel-kicker">Viewers Of This Category Also Watch</p>
+                    <h3 class="section-title">Nearby audience interests</h3>
+                </div>
+                <p class="similar-description">Estimated audience next-watch options based on nearby live demand patterns, category movement, and likely crossover interest.</p>
+                <div class="also-watch-grid">
+                    {% for category in also_watch_categories %}
+                    {% set also_watch_opportunity_class = "opportunity-" ~ (category.opportunity|lower|replace(" ", "-")) %}
+                    <a class="also-watch-card" href="{{ category.href }}">
+                        <div class="also-watch-media">
+                            {% if category.box_art_url %}
+                            <img src="{{ category.box_art_url }}" alt="{{ category.game_name }} box art">
+                            {% else %}
+                            <div class="game-card-fallback">{{ category.game_name[:1] }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="also-watch-copy">
+                            <div class="similar-card-top">
+                                <strong>{{ category.game_name }}</strong>
+                                <span class="opportunity-pill {{ also_watch_opportunity_class }} tooltip-anchor">
+                                    {{ category.opportunity }}
+                                    <span class="metric-tooltip">{{ opportunity_help(category.opportunity) }}</span>
+                                </span>
+                            </div>
+                        </div>
+                    </a>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+
+            <section class="graph-board" id="metric-graph-board" data-selected-game="{{ selected_game.game_name or selected_game.game }}">
+                <div class="graph-toolbar">
+                    <div>
+                        <p class="panel-kicker">Metric History</p>
+                        <h3 class="section-title" id="graph-title">Select a metric graph to view its trend over time.</h3>
+                    </div>
+                    <div class="graph-controls">
+                        <label class="graph-select-field">
+                            Metric
+                            <select id="graph-metric-select">
+                                <option value="">Select metric</option>
+                                <option value="score">Score</option>
+                                <option value="viewers">Viewers</option>
+                                <option value="streams">Streams</option>
+                                <option value="ratio">Viewer / Stream</option>
+                                <option value="growth">Growth</option>
+                                <option value="viewer_change">Viewer Change</option>
+                            </select>
+                        </label>
+                        <label class="graph-select-field">
+                            Range
+                            <select id="graph-range-select">
+                                <option value="live">Live</option>
+                                <option value="1h">1H</option>
+                                <option value="6h">6H</option>
+                                <option value="24h">24H</option>
+                                <option value="all">All</option>
+                                <option value="custom">Custom</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="graph-custom-range is-hidden" id="graph-custom-range">
+                    <div class="graph-history-meta" id="graph-history-meta">
+                        <strong>{{ selected_history_summary.count }}</strong>
+                        <span>
+                            snapshots available
+                            {% if selected_history_summary.start and selected_history_summary.end %}
+                            from {{ selected_history_summary.start }} to {{ selected_history_summary.end }}
+                            {% endif %}
+                        </span>
+                    </div>
+                    <label>
+                        Start
+                        <input type="datetime-local" id="graph-start">
+                    </label>
+                    <label>
+                        End
+                        <input type="datetime-local" id="graph-end">
+                    </label>
+                    <button type="button" class="graph-action" id="apply-graph-range">Apply Range</button>
+                </div>
+
+                <div class="graph-canvas-wrap">
+                    <svg id="metric-graph" viewBox="0 0 900 320" preserveAspectRatio="none" aria-label="Metric history graph">
+                        <g id="graph-grid"></g>
+                        <g id="graph-axis-labels"></g>
+                        <path id="graph-area" d=""></path>
+                        <g id="graph-crosshair"></g>
+                        <g id="graph-segments"></g>
+                        <g id="graph-points"></g>
+                    </svg>
+                    <div class="graph-hover-tooltip" id="graph-hover-tooltip"></div>
+                    <div class="graph-empty" id="graph-empty">Pick a metric to plot its history.</div>
+                </div>
+            </section>
+
+            <script id="history-data" type="application/json">{{ selected_history|tojson }}</script>
+            <script id="history-summary-data" type="application/json">{{ selected_history_summary|tojson }}</script>
+            <script id="selected-analytics-data" type="application/json">{{ selected_analytics|tojson }}</script>
+        </section>
+        {% endif %}
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
