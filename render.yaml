@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: live-trend-predictor
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 120 run:app
+    envVars:
+      - key: FLASK_DEBUG
+        value: "0"
+      - key: TWITCH_CLIENT_ID
+        sync: false
+      - key: TWITCH_CLIENT_SECRET
+        sync: false
+      - key: LIVE_REFRESH_MAX_PAGES
+        value: "30"
+      - key: MIN_TRACKED_STREAM_VIEWERS
+        value: "20"
+      - key: REFRESH_INTERVAL_SECONDS
+        value: "20"
+    disk:
+      name: cache
+      mountPath: /opt/render/project/src/cache
+      sizeGB: 1

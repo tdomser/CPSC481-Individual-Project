@@ -43,6 +43,33 @@ python run.py
 
 Then open `http://127.0.0.1:5000/`.
 
+## Deploy
+
+This app needs a real Python web host because it runs Flask and calls the Twitch API. A static host like GitHub Pages is not enough by itself.
+
+The simplest option for this project is [Render](https://render.com/):
+
+1. Push this repo to GitHub.
+2. Create a new Render Web Service from the repo.
+3. Render can use the included `render.yaml`, or you can set these manually:
+
+```text
+Build command: pip install -r requirements.txt
+Start command: gunicorn --workers 1 --threads 4 --timeout 120 run:app
+```
+
+4. Add these environment variables in Render:
+   - `TWITCH_CLIENT_ID`
+   - `TWITCH_CLIENT_SECRET`
+   - `FLASK_DEBUG=0`
+5. Deploy and open the generated `onrender.com` URL.
+
+Notes:
+
+- The included `Procfile` also helps on platforms like Railway that support Procfile-style startup.
+- This app writes cache/history files under `cache/`, so the included Render config mounts a persistent disk there.
+- The deploy command uses a single Gunicorn worker on purpose so the background refresh thread does not run in multiple processes.
+
 ## Environment variables
 
 - `TWITCH_CLIENT_ID`: Twitch API client id
